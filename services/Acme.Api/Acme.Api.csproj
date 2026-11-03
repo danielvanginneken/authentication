@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!--
+    Contract pipeline, step 1: every build writes ../../contracts/openapi.json.
+    That file is committed; `task codegen` turns it into packages/api-client, and CI fails if either drifts.
+  -->
+  <PropertyGroup>
+    <OpenApiGenerateDocumentsOnBuild>true</OpenApiGenerateDocumentsOnBuild>
+    <OpenApiDocumentsDirectory>$(MSBuildThisFileDirectory)../../contracts</OpenApiDocumentsDirectory>
+    <OpenApiGenerateDocumentsOptions>--file-name openapi</OpenApiGenerateDocumentsOptions>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
+    <!-- Build-time tool only: never flows to consumers or into the published app. -->
+    <PackageReference Include="Microsoft.Extensions.ApiDescription.Server">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\libs\Acme.Application\Acme.Application.csproj" />
+    <ProjectReference Include="..\..\libs\Acme.Infrastructure\Acme.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\libs\Acme.Contracts\Acme.Contracts.csproj" />
+  </ItemGroup>
+
+</Project>

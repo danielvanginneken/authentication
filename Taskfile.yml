@@ -1,0 +1,128 @@
+# https://taskfile.dev — one entry point for both toolchains. Run `task` to see everything.
+version: "3"
+
+vars:
+  SLN: Acme.slnx
+  API: services/Acme.Api
+  COMPOSE: docker compose -f infra/docker/compose.yml
+
+tasks:
+  default:
+    silent: true
+    cmds:
+      - task --list
+
+  # ── Setup & infra ────────────────────────────────────────────────────────────
+
+  setup:
+    desc: Install everything a fresh clone needs
+    cmds:
+      - pnpm install
+      - dotnet tool restore
+      - dotnet restore {{.SLN}}
+      - task: env
+
+  env:
+    desc: Create local env files from their .example (never overwrites)
+    status:
+      - test -f apps/web/.env.local
+    cmds:
+      - cp apps/web/.env.example apps/web/.env.local
+
+  up:
+    desc: Start local infra (Postgres, Seq, Mailpit) and wait until healthy
+    cmds:
+      - "{{.COMPOSE}} up --detach --wait"
+
+  down:
+    desc: Stop local infra (data is kept)
+    cmds:
+      - "{{.COMPOSE}} down"
+
+  reset:
+    desc: Stop local infra AND delete its data volumes
+    prompt: This deletes all local database data. Continue?
+    cmds:
+      - "{{.COMPOSE}} down --volumes"
+
+  # ── Development ──────────────────────────────────────────────────────────────
+
+  dev:
+    desc: Run API + web together (Ctrl+C stops both)
+    deps: [dev:api, dev:web]
+
+  dev:api:
+    desc: API with hot reload on http://localhost:8080
+    cmds:
+      - dotnet watch run --project {{.API}} --launch-profile http
+
+  dev:web:
+    desc: Web with hot reload on http://localhost:3000
+    deps: [env]
+    cmds:
+      - pnpm --filter @acme/web dev
+
+  # ── Quality gates (CI runs the same commands) ────────────────────────────────
+
+  build:
+    desc: Build both halves (also regenerates contracts/openapi.json)
+    cmds:
+      - dotnet build {{.SLN}}
+      - pnpm build
+
+  test:
+    desc: Run all tests
+    cmds:
+      - dotnet test {{.SLN}}
+      - pnpm test
+
+  lint:
+    desc: Check formatting, lint and types — changes nothing
+    cmds:
+      - dotnet format {{.SLN}} --verify-no-changes
+      - pnpm format:check
+      - pnpm lint
+      - pnpm typecheck
+
+  format:
+    desc: Fix formatting in both halves
+    cmds:
+      - dotnet format {{.SLN}}
+      - pnpm format
+
+  codegen:
+    desc: C# DTOs → contracts/openapi.json → packages/api-client
+    cmds:
+      # 1. Building the API runs the OpenAPI generator (see Acme.Api.csproj).
+      - dotnet build {{.API}}
+      # 2. The generated spec becomes the typed TS client.
+      - pnpm --filter @acme/api-client generate
+
+  check:
+    desc: Everything CI checks (codegen regenerates instead of failing) — run before a PR
+    cmds:
+      - task: lint
+      - task: codegen
+      - task: test
+      - task: build
+      - cmd: echo "All checks passed. If codegen changed contracts/ or packages/api-client/, commit those too."
+        silent: true
+
+  # ── Template ─────────────────────────────────────────────────────────────────
+
+  init:
+    desc: "Rename the template once: task init -- MyProduct"
+    cmds:
+      - node tools/init.mjs {{.CLI_ARGS}}
+      # New names change the lockfiles, and longer/shorter names shift Markdown tables.
+      - pnpm install
+      - pnpm format
+      # New names also re-sort `using` directives (a name after "Microsoft" breaks import order).
+      # Bare `dotnet format`/`dotnet build`: {{.SLN}} still holds the old name until Task re-reads this file.
+      - dotnet format
+      # A fresh UserSecretsId per project. A fixed one in the template would make every project
+      # read and overwrite the same secrets store. ({{.API}} also still holds the old name.)
+      - dotnet user-secrets init --project services/{{.CLI_ARGS}}.Api
+      - dotnet build
+      - cmd: echo "Done. Delete the init task and tools/init.mjs, then commit."
+        silent: true
